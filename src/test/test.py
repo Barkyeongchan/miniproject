@@ -3,7 +3,7 @@ import os
 import time
 
 # 저장 경로 지정
-save_dir = '../img'
+save_dir = '../../img'
 os.makedirs(save_dir, exist_ok=True)  # 폴더 없으면 생성
 
 # 카메라 캡쳐 열기
