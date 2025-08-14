@@ -1,4 +1,5 @@
 import cv2
+import os
 
 # 카메라 캡쳐 열기
 cap = cv2.VideoCapture(0)
@@ -18,6 +19,13 @@ while True:
     contours, _ = cv2.findContours(fgmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     for cnt in contours:
         if cv2.contourArea(cnt) > 3000:  # 작은 잡음 무시
+
+            print('움직임 발생')
+            i = 1
+            for i in range(100):
+                cap_img = os.path.join('../img', f'motion_detected{i}.jpg')         
+                cv2.imwrite(cap_img, frame)
+
             x, y, w, h = cv2.boundingRect(cnt)
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
