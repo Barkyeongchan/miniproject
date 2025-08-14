@@ -6,6 +6,9 @@ import time
 cap = cv2.VideoCapture(0)
 fgbg = cv2.createBackgroundSubtractorMOG2()  # 정적인 배경 학습 객체
 
+# 이미지 저장시 이름 숫자 카운터 초기화
+img_counter = 0
+
 while True:
     ret, frame = cap.read() # ret = 프레임 읽기를 성공 여부를 나타냄
     if not ret:             # 프레임 읽기를 하지 못하면
@@ -18,19 +21,22 @@ while True:
 
     # 움직임 영역 표시
     contours, _ = cv2.findContours(fgmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    motion_detected = False # 움직임이 감지되지 않으로 초기화
+
     for cnt in contours:
         if cv2.contourArea(cnt) > 3000:  # 작은 잡음 무시
-
-            print('움직임 발생')
-            i = 1
-            for i in range(100):
-                cap_img = os.path.join('../img', f'motion_detected{i}.jpg')         
-                cv2.imwrite(cap_img, frame)
-
-            time.sleep(1.0)
-
+            motion_detected = True  # 움직임 감지
             x, y, w, h = cv2.boundingRect(cnt)
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+    if motion_detected:     
+        cap_img = os.path.join('../img', f'motion_detected{img_counter}.jpg')         
+        cv2.imwrite(cap_img, frame)
+        print('움직임 발생')
+        img_counter += 1
+
+        time.sleep(1.0) # 1초 대기
 
     # 웹캠 창 출력
     cv2.imshow("Video", frame)
