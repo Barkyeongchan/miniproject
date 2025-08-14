@@ -80,7 +80,7 @@ _국내 블랙박스 브랜드 점유율 TOP 2 기업_
 
 [최소 구현 목표 변환](https://docs.google.com/document/d/1KR1Ek3QEK2PorDblV3TpiJ__KWXGa5N0oOg1SPpD4f0/edit?tab=t.2lpizc91xvge)에 맞춰 코드 생성
 
-[test.md](src/test.md)
+[test.md](src/test/test.md)
 
 </div>
 </details>
