@@ -1,5 +1,6 @@
 import cv2
 import os
+import time
 
 # 카메라 캡쳐 열기
 cap = cv2.VideoCapture(0)
@@ -25,6 +26,8 @@ while True:
             for i in range(100):
                 cap_img = os.path.join('../img', f'motion_detected{i}.jpg')         
                 cv2.imwrite(cap_img, frame)
+
+            time.sleep(1.0)
 
             x, y, w, h = cv2.boundingRect(cnt)
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
