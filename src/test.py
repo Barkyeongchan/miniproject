@@ -2,6 +2,10 @@ import cv2
 import os
 import time
 
+# 저장 경로 지정
+save_dir = '../img'
+os.makedirs(save_dir, exist_ok=True)  # 폴더 없으면 생성
+
 # 카메라 캡쳐 열기
 cap = cv2.VideoCapture(0)
 fgbg = cv2.createBackgroundSubtractorMOG2()  # 정적인 배경 학습 객체
@@ -31,7 +35,7 @@ while True:
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
     if motion_detected:     
-        cap_img = os.path.join('../img', f'motion_detected{img_counter}.jpg')         
+        cap_img = os.path.join(save_dir, f'motion_detected{img_counter}.jpg')         
         cv2.imwrite(cap_img, frame)
         print('움직임 발생')
         img_counter += 1
