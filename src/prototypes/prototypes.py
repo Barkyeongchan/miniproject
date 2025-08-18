@@ -5,7 +5,7 @@ import numpy as np
 VIDEO_PATH = "../../assets/drive_sample.mp4"  # 영상 경로
 SHOW_BINARY = True          # 이진 마스크 미리보기
 SAVE_OUTPUT = False         # 결과 저장 여부
-OUTPUT_PATH = "lane_output_fixed_roi.mp4"
+OUTPUT_PATH = "lane_output_curve_roi.mp4"
 SCALE = 0.6                 # 출력 창 크기 비율
 
 # HLS S채널 임계값
@@ -43,19 +43,15 @@ def region_of_interest(img):
 # ---------- 차선 이진화 ----------
 def threshold_binary(frame):
     blur = cv2.GaussianBlur(frame, (GAUSS_KSIZE, GAUSS_KSIZE), 0)
-    # HLS S채널
     hls = cv2.cvtColor(blur, cv2.COLOR_BGR2HLS)
     s = hls[:,:,2]
     s_bin = cv2.inRange(s, S_MIN, S_MAX)
-    # Sobel X
     gray = cv2.cvtColor(blur, cv2.COLOR_BGR2GRAY)
     sx = cv2.Sobel(gray, cv2.CV_16S, 1, 0, ksize=3)
     sx = cv2.convertScaleAbs(sx)
     sx_bin = cv2.inRange(sx, SX_MIN, SX_MAX)
-    # 합치기
     combined = cv2.bitwise_or(s_bin, sx_bin)
     combined = region_of_interest(combined)  # ROI 적용
-    # 모폴로지
     k = cv2.getStructuringElement(cv2.MORPH_RECT, (MORPH_K, MORPH_K))
     combined = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, k, iterations=2)
     return combined
@@ -87,8 +83,8 @@ def separate_left_right(lines, img_shape):
             right.append((x1,y1,x2,y2))
     return left, right
 
-# ---------- 점선 자연 연결 ----------
-def fit_and_draw_lane(frame, segments, color, thickness=8):
+# ---------- 점선 자연 연결 (곡선) ----------
+def fit_and_draw_lane(frame, segments, color, thickness=8, poly_order=2):
     if len(segments) == 0:
         return None
     xs, ys = [], []
@@ -97,16 +93,15 @@ def fit_and_draw_lane(frame, segments, color, thickness=8):
         ys += [y1,y2]
     xs = np.array(xs)
     ys = np.array(ys)
-    # y에 따른 x 회귀
-    A = np.vstack([ys, np.ones_like(ys)]).T
-    a, b = np.linalg.lstsq(A, xs, rcond=None)[0]
+    coeffs = np.polyfit(ys, xs, poly_order)  # x = f(y)
     h = frame.shape[0]
     y_bottom = int(h*ROI_BOTTOM_Y)
-    y_top = int(h*ROI_TOP_Y)
-    x_bottom = int(a*y_bottom + b)
-    x_top    = int(a*y_top + b)
-    cv2.line(frame, (x_bottom, y_bottom), (x_top, y_top), color, thickness, cv2.LINE_AA)
-    return (x_bottom, y_bottom, x_top, y_top)
+    y_top    = int(h*ROI_TOP_Y)
+    y_vals = np.linspace(y_bottom, y_top, num=(y_bottom-y_top+1))
+    x_vals = np.polyval(coeffs, y_vals).astype(int)
+    for i in range(len(y_vals)-1):
+        cv2.line(frame, (x_vals[i], int(y_vals[i])), (x_vals[i+1], int(y_vals[i+1])), color, thickness, cv2.LINE_AA)
+    return (x_vals[0], y_bottom, x_vals[-1], y_top)
 
 # ---------- 마스크 오버레이 ----------
 def overlay_mask(frame, binary, alpha=0.35):
@@ -151,7 +146,7 @@ def main():
                                  (w-10, 10+small.shape[0]), (0,0,0), 2)
 
         vis_resized = cv2.resize(vis, (int(w*SCALE), int(h*SCALE)))
-        cv2.imshow("Lane Detection (Fixed ROI)", vis_resized)
+        cv2.imshow("Lane Detection (Curve ROI)", vis_resized)
 
         if writer is not None:
             writer.write(vis)
