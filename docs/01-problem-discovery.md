@@ -49,6 +49,7 @@
 ### RED 단계 완료 보고서
 
 <div style="border:2px solid gray; padding:10px; border-radius:8px;">
+  
 프로젝트명 : 교통법규 위반 신고 간편화 프로그램
 
 날짜 : 20250818
