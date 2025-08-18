@@ -24,3 +24,47 @@
 
 ## **20250818**
 
+### Red 단계 문제점 확인
+
+- `낮은 fps` : 15 ~ 25fps 사이로 나타나기 때문에 원활한 객체 인식을 하기에 부족함
+
+<img width="402" height="320" alt="image" src="https://github.com/Barkyeongchan/miniproject/blob/main/assets/low_fps.PNG?raw=true" />
+
+### 목표 상태 정의
+
+[FPS 개선 성공 기준]
+
+- `Before (현재 상태)` : 15 ~ 25fps
+
+- `After (목표 상태)` : 30fps 유지
+
+> 30fps로 정한 이유 : 높은 fps는 더 정확하고 세밀한 인식이 가능하지만 연산량 증가로 지연이 발생하기 때문에 대부분의 상황에서 객체인식이 가능하며 과도한 연산량을 가지지않는 30fps로 정함
+
+### 동료 리뷰
+
+- 실제로 주행 중에 30fps로 인식이 가능한가?
+
+- 30fps 유지는 필요하다
+
+### RED 단계 완료 보고서
+
+<div style="border:2px solid gray; padding:10px; border-radius:8px;">
+프로젝트명 : 교통법규 위반 신고 간편화 프로그램
+
+날짜 : 20250818
+
+`발견한 핵심문제`
+- 영상의 FPS가 15 ~ 25fps로 낮고 유동적인 상태이므로 주행 중 정확인 객체인식이 어렵다고 판단됨
+
+`설정한 목표`
+- Before: 15 ~ 25fps
+
+- After: 30fps
+
+`동료 피드백`
+- 30fps를 유지하되 실제로 작동 하는지는 확인 필요
+
+`Green 단계 계획`
+- 영상을 30fps로 올린 후 유지시킴
+
+</div>
