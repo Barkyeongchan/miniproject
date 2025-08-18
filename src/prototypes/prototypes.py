@@ -24,10 +24,6 @@ ROI_RIGHT_X  = 0.9
 ROI_TOP_LEFT_X  = 0.45
 ROI_TOP_RIGHT_X = 0.55
 
-# 튐 방지 설정
-prev_lanes = {}  # {'left': (x_bottom, y_bottom, x_top, y_top), 'right': ...}
-MAX_SHIFT = 50   # 차선 한쪽 끝 좌표 변화 허용 최대 픽셀
-
 # ---------- ROI 마스크 ----------
 def region_of_interest(img):
     h, w = img.shape[:2]
@@ -84,46 +80,29 @@ def separate_left_right(lines, img_shape):
             right.append((x1,y1,x2,y2))
     return left, right
 
-# ---------- RANSAC 기반 곡선 보간 (튀는 변화 방지 추가) ----------
-def fit_and_draw_lane_ransac(frame, segments, color, side='left', thickness=8, poly_order=2):
-    global prev_lanes
+# ---------- RANSAC 기반 곡선 보간 ----------
+def fit_and_draw_lane_ransac(frame, segments, color, thickness=8, poly_order=2):
     if len(segments)==0:
-        # 이전 값이 있으면 그대로 사용
-        if side in prev_lanes:
-            x0, y0, x1, y1 = prev_lanes[side]
-            cv2.line(frame, (x0,y0), (x1,y1), color, thickness, cv2.LINE_AA)
-        return prev_lanes.get(side, None)
-
+        return None
     xs, ys = [], []
     for x1,y1,x2,y2 in segments:
         xs += [x1,x2]
         ys += [y1,y2]
     xs = np.array(xs)
     ys = np.array(ys)
-
+    # RANSAC 회귀
     ys_reshaped = ys.reshape(-1,1)
     ransac = RANSACRegressor()
     ransac.fit(ys_reshaped, xs)
-
     h = frame.shape[0]
     y_bottom = int(h*ROI_BOTTOM_Y)
     y_top    = int(h*ROI_TOP_Y)
     y_vals = np.linspace(y_bottom, y_top, num=(y_bottom-y_top+1))
     x_vals = ransac.predict(y_vals.reshape(-1,1)).astype(int)
-
-    # 이전 값과 비교해서 큰 변화가 있으면 이전값 사용
-    if side in prev_lanes:
-        prev_x0, prev_y0, prev_x1, prev_y1 = prev_lanes[side]
-        if abs(prev_x0 - x_vals[0]) > MAX_SHIFT or abs(prev_x1 - x_vals[-1]) > MAX_SHIFT:
-            x_vals[0] = prev_x0
-            x_vals[-1] = prev_x1
-
+    # 선 그리기
     for i in range(len(y_vals)-1):
         cv2.line(frame, (x_vals[i], int(y_vals[i])), (x_vals[i+1], int(y_vals[i+1])), color, thickness, cv2.LINE_AA)
-
-    # 현재 프레임 값을 prev_lanes에 저장
-    prev_lanes[side] = (x_vals[0], y_bottom, x_vals[-1], y_top)
-    return prev_lanes[side]
+    return (x_vals[0], y_bottom, x_vals[-1], y_top)
 
 # ---------- 마스크 오버레이 ----------
 def overlay_mask(frame, binary, alpha=0.35):
@@ -156,8 +135,8 @@ def main():
         left, right = separate_left_right(lines, frame.shape)
 
         vis = overlay_mask(frame.copy(), lane_mask) if SHOW_BINARY else frame.copy()
-        fit_and_draw_lane_ransac(vis, left,  (0,255,0), side='left', thickness=10)
-        fit_and_draw_lane_ransac(vis, right, (0,150,255), side='right', thickness=10)
+        fit_and_draw_lane_ransac(vis, left,  (0,255,0), thickness=10)
+        fit_and_draw_lane_ransac(vis, right, (0,150,255), thickness=10)
 
         h, w = vis.shape[:2]
         if SHOW_BINARY:
