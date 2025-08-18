@@ -16,6 +16,9 @@ img_counter = 0
 last_capture_time = 0  # 마지막 캡처 시각
 capture_interval = 1.0  # 캡처 간격(초)
 
+# FPS 측정용 변수
+prev_time = time.time()
+
 while True:
     ret, frame = cap.read() # ret = 프레임 읽기를 성공 여부를 나타냄
     if not ret:             # 프레임 읽기를 하지 못하면
@@ -39,6 +42,14 @@ while True:
 
     # 현재 시각
     current_time = time.time()
+
+    # FPS 계산
+    fps = 1.0 / (current_time - prev_time)
+    prev_time = current_time
+
+    # 프레임 위에 FPS 표시
+    cv2.putText(frame, f"FPS: {fps:.2f}", (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
 
     # 움직임이 감지되고, 마지막 저장 시각에서 일정 시간이 지났으면 저장
     if motion_detected and (current_time - last_capture_time) >= capture_interval:     
