@@ -81,35 +81,47 @@ def draw_lane_curve_birdeye(warped, left_model, right_model):
         pts_right = np.vstack([right_x, y_vals]).T[::-1]
         pts = np.vstack([pts_left, pts_right])
         pts = np.array([pts], dtype=np.int32)
-        # 하늘색 오버레이는 잠시 제외
-        # cv2.fillPoly(overlay,[pts],(180,255,255))
     result = cv2.addWeighted(warped,1.0,overlay,0.4,0)
     return result
 
-# ---------- 박스 연결 및 길이 기준 필터 ----------
+# ---------- 박스 통합 + 길이/가로거리 필터 ----------
 def merge_and_filter_boxes(boxes):
     if not boxes: return []
-    # y 기준 정렬
     boxes = sorted(boxes, key=lambda b: b[1])
     merged = []
     current = boxes[0]
     for b in boxes[1:]:
-        # 위아래 약간 늘려서 연결 확인
-        extended_current = [current[0], current[1]-5, current[2], current[3]+5]
-        if not (b[0] > extended_current[2] or b[2] < extended_current[0] or b[1] > extended_current[3] or b[3] < extended_current[1]):
-            # 합치기
-            current = [min(current[0],b[0]), min(current[1],b[1]),
-                       max(current[2],b[2]), max(current[3],b[3])]
-            # 길이 필터: 너무 길면 버림
-            if current[3]-current[1] > 3*(b[3]-b[1]):
-                current = b
-        else:
+        # 위/아래 연결 시도
+        connected = False
+        for factor in [1,2,3]:
+            extended_current = [current[0], current[1]-factor*5, current[2], current[3]+factor*5]
+            if not (b[0] > extended_current[2] or b[2] < extended_current[0] or b[1] > extended_current[3] or b[3] < extended_current[1]):
+                # 합치기
+                current = [min(current[0],b[0]), min(current[1],b[1]),
+                           max(current[2],b[2]), max(current[3],b[3])]
+                connected = True
+                break
+        if not connected:
             merged.append(current)
             current = b
     merged.append(current)
-    return merged
 
-# ---------- 버드아이뷰 박스 표시 (통합+필터) ----------
+    # 길이 필터 & 가로 거리 필터
+    final_boxes = []
+    for b in merged:
+        width = b[2]-b[0]
+        height = b[3]-b[1]
+        if height > 3*width:  # 너무 길면 버림
+            continue
+        # 이전 박스와 가로 거리 확인
+        if final_boxes:
+            prev = final_boxes[-1]
+            if b[0] - prev[2] > width/2:  # 반 폭 이상 떨어지면 버림
+                continue
+        final_boxes.append(b)
+    return final_boxes
+
+# ---------- 버드아이뷰 박스 표시 ----------
 def draw_lane_boxes_birdeye_merged_filtered(warped, left_segments, right_segments):
     boxes = []
     for seg_list in [left_segments, right_segments]:
@@ -141,12 +153,9 @@ def main():
         left_model = fit_lane_curve_ransac(left)
         right_model = fit_lane_curve_ransac(right)
 
-        # --- 버드아이뷰 오버레이 (curve 제외) ---
         vis_birdeye = draw_lane_curve_birdeye(warped_roi, left_model, right_model)
-        # --- 겹친 박스 통합 + 연결 + 필터 ---
         vis_birdeye = draw_lane_boxes_birdeye_merged_filtered(vis_birdeye, left, right)
 
-        # --- 오른쪽 상단 축소 표시 ---
         roi_h, roi_w = vis_birdeye.shape[:2]
         scale = 0.4
         resized_roi = cv2.resize(vis_birdeye,(int(roi_w*scale), int(roi_h*scale)))
