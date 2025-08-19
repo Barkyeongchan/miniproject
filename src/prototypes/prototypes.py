@@ -72,7 +72,7 @@ def detect_lanes_birdeye(warped):
     left, right = [], []
     h, w = warped.shape[:2]
     if lines is None:
-        return left, right
+        return left, right, edges
     for l in lines:
         x1,y1,x2,y2 = l[0]
         if x2==x1: continue
@@ -84,7 +84,7 @@ def detect_lanes_birdeye(warped):
             right.append((x1,y1,x2,y2))
     return left, right, edges
 
-# ---------- 차선 오버레이 ----------
+# ---------- curve 오버레이 ----------
 def draw_lane_overlay(frame, left_model, right_model, Minv):
     h, w = frame.shape[:2]
     y_bottom = 0
@@ -97,9 +97,34 @@ def draw_lane_overlay(frame, left_model, right_model, Minv):
         pts_right = np.vstack([right_x, y_vals]).T[::-1]
         pts = np.vstack([pts_left, pts_right])
         pts = np.array([pts], dtype=np.int32)
-        # 원래 이미지 크기로 역투영
         pts_orig = cv2.perspectiveTransform(pts.reshape(-1,1,2).astype(np.float32), Minv)
         cv2.fillPoly(overlay, [pts_orig.astype(int)], (180,255,255))
+    result = cv2.addWeighted(frame,1.0,overlay,0.4,0)
+    return result
+
+# ---------- 점선 차선 박스 오버레이 ----------
+def draw_lane_boxes(frame, left_segments, right_segments, Minv):
+    overlay = np.zeros_like(frame)
+
+    def create_boxes(segments):
+        boxes = []
+        for x1,y1,x2,y2 in segments:
+            top = min(y1,y2)
+            bottom = max(y1,y2)
+            left = min(x1,x2)-5
+            right = max(x1,x2)+5
+            boxes.append([left, top, right, bottom])
+        return boxes
+
+    left_boxes = create_boxes(left_segments)
+    right_boxes = create_boxes(right_segments)
+
+    for box_list in [left_boxes, right_boxes]:
+        for left, top, right, bottom in box_list:
+            pts = np.array([[[left,top],[right,top],[right,bottom],[left,bottom]]], dtype=np.float32)
+            pts_orig = cv2.perspectiveTransform(pts, Minv)
+            cv2.fillPoly(overlay, [pts_orig.astype(int)], (0,255,255))
+
     result = cv2.addWeighted(frame,1.0,overlay,0.4,0)
     return result
 
@@ -119,10 +144,12 @@ def main():
         left_model = fit_lane_curve_ransac(left)
         right_model = fit_lane_curve_ransac(right)
 
-        # 원본에 오버레이
+        # --- curve 오버레이 유지 ---
         vis = draw_lane_overlay(frame, left_model, right_model, Minv)
+        # --- 점선 차선 박스 추가 ---
+        vis = draw_lane_boxes(vis, left, right, Minv)
 
-        # 오른쪽에 warp ROI 미리보기
+        # --- 오른쪽에 warp ROI 미리보기 ---
         roi_h, roi_w = warped.shape[:2]
         scale = 0.4
         resized_roi = cv2.resize(warped, (int(roi_w*scale), int(roi_h*scale)))
@@ -130,8 +157,7 @@ def main():
         y_offset = 10
         vis[y_offset:y_offset+resized_roi.shape[0], x_offset:x_offset+resized_roi.shape[1]] = resized_roi
         cv2.rectangle(vis, (x_offset, y_offset),
-                      (x_offset+resized_roi.shape[1], y_offset+resized_roi.shape[0]),
-                      (0,0,255), 2)
+                      (x_offset+resized_roi.shape[1], y_offset+resized_roi.shape[0]), (0,0,255), 2)
         cv2.putText(vis, "Warped ROI", (x_offset+5, y_offset+25),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
 
