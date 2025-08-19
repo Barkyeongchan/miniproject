@@ -13,7 +13,7 @@ ROI_TOP_Y    = 0.6
 # ---------- ROI 마스크 ----------
 def region_of_interest(img):
     h, w = img.shape[:2]
-    pts = np.array([[
+    pts = np.array([[ 
         (int(w*0.1), int(h*ROI_BOTTOM_Y)),
         (int(w*0.35), int(h*ROI_TOP_Y)),
         (int(w*0.65), int(h*ROI_TOP_Y)),
@@ -69,7 +69,7 @@ def detect_lanes_birdeye(warped):
         elif slope>0 and min(x1,x2)>w*0.45: right.append((x1,y1,x2,y2))
     return left, right
 
-# ---------- 버드아이뷰 curve 표시 (하늘색 오버레이 잠시 제외) ----------
+# ---------- 버드아이뷰 curve 표시 ----------
 def draw_lane_curve_birdeye(warped, left_model, right_model):
     h, w = warped.shape[:2]
     y_bottom, y_top = 0, h-1
@@ -86,21 +86,36 @@ def draw_lane_curve_birdeye(warped, left_model, right_model):
     result = cv2.addWeighted(warped,1.0,overlay,0.4,0)
     return result
 
-# ---------- 버드아이뷰 차선 박스 (빨간 테두리, 투명) ----------
-def draw_lane_boxes_birdeye(warped, left_segments, right_segments):
-    overlay = np.zeros_like(warped)
-    def create_boxes(segments):
-        boxes = []
-        for x1,y1,x2,y2 in segments:
+# ---------- 겹치는 박스 통합 ----------
+def merge_boxes(boxes):
+    if not boxes: return []
+    # y 기준 정렬
+    boxes = sorted(boxes, key=lambda b: b[1])
+    merged = []
+    current = boxes[0]
+    for b in boxes[1:]:
+        # x/y 겹치면 합치기
+        if not (b[0] > current[2] or b[2] < current[0] or b[1] > current[3] or b[3] < current[1]):
+            current = [min(current[0],b[0]), min(current[1],b[1]),
+                       max(current[2],b[2]), max(current[3],b[3])]
+        else:
+            merged.append(current)
+            current = b
+    merged.append(current)
+    return merged
+
+# ---------- 버드아이뷰 차선 박스 통합 ----------
+def draw_lane_boxes_birdeye_merged(warped, left_segments, right_segments):
+    boxes = []
+    for seg_list in [left_segments, right_segments]:
+        for x1,y1,x2,y2 in seg_list:
             top = min(y1,y2); bottom = max(y1,y2)
             left = min(x1,x2)-5; right = max(x1,x2)+5
-            boxes.append([left, top, right, bottom])
-        return boxes
-    left_boxes = create_boxes(left_segments)
-    right_boxes = create_boxes(right_segments)
-    for box_list in [left_boxes, right_boxes]:
-        for left,top,right,bottom in box_list:
-            cv2.rectangle(overlay,(left,top),(right,bottom),(0,0,255),2)
+            boxes.append([left,top,right,bottom])
+    merged_boxes = merge_boxes(boxes)
+    overlay = np.zeros_like(warped)
+    for left,top,right,bottom in merged_boxes:
+        cv2.rectangle(overlay,(left,top),(right,bottom),(0,0,255),3)
     result = cv2.addWeighted(warped,1.0,overlay,0.4,0)
     return result
 
@@ -121,11 +136,12 @@ def main():
         left_model = fit_lane_curve_ransac(left)
         right_model = fit_lane_curve_ransac(right)
 
-        # --- 버드아이뷰 오버레이 (curve 잠시 제외, 빨간 박스 표시) ---
+        # --- 버드아이뷰 오버레이 (curve 제외) ---
         vis_birdeye = draw_lane_curve_birdeye(warped_roi, left_model, right_model)
-        vis_birdeye = draw_lane_boxes_birdeye(vis_birdeye, left, right)
+        # --- 겹친 박스 통합 표시 ---
+        vis_birdeye = draw_lane_boxes_birdeye_merged(vis_birdeye, left, right)
 
-        # --- 오른쪽 상단에 축소된 버드아이뷰 표시 ---
+        # --- 오른쪽 상단 축소 표시 ---
         roi_h, roi_w = vis_birdeye.shape[:2]
         scale = 0.4
         resized_roi = cv2.resize(vis_birdeye,(int(roi_w*scale), int(roi_h*scale)))
@@ -135,7 +151,7 @@ def main():
         cv2.rectangle(frame,(x_offset,y_offset),(x_offset+resized_roi.shape[1],y_offset+resized_roi.shape[0]),(0,0,255),2)
         cv2.putText(frame,"Warped ROI",(x_offset+5,y_offset+25),cv2.FONT_HERSHEY_SIMPLEX,0.7,(0,0,255),2)
 
-        cv2.imshow("Lane Detection BirdEye + Boxes", cv2.resize(frame,(int(frame.shape[1]*SCALE),int(frame.shape[0]*SCALE))))
+        cv2.imshow("Lane Detection BirdEye + Merged Boxes", cv2.resize(frame,(int(frame.shape[1]*SCALE),int(frame.shape[0]*SCALE))))
         if cv2.waitKey(1) & 0xFF==ord('q'): break
 
     cap.release()
