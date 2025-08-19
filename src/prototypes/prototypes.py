@@ -27,12 +27,10 @@ ROI_TOP_RIGHT_X = 0.55
 # ---------- ROI 마스크 ----------
 def region_of_interest(img):
     h, w = img.shape[:2]
-    pts = np.array([[
-        (int(w*ROI_LEFT_X),  int(h*ROI_BOTTOM_Y)),
-        (int(w*ROI_TOP_LEFT_X),  int(h*ROI_TOP_Y)),
-        (int(w*ROI_TOP_RIGHT_X), int(h*ROI_TOP_Y)),
-        (int(w*ROI_RIGHT_X), int(h*ROI_BOTTOM_Y))
-    ]], dtype=np.int32)
+    pts = np.array([[ (int(w*ROI_LEFT_X),  int(h*ROI_BOTTOM_Y)),
+                      (int(w*ROI_TOP_LEFT_X),  int(h*ROI_TOP_Y)),
+                      (int(w*ROI_TOP_RIGHT_X), int(h*ROI_TOP_Y)),
+                      (int(w*ROI_RIGHT_X), int(h*ROI_BOTTOM_Y)) ]], dtype=np.int32)
     mask = np.zeros_like(img)
     cv2.fillPoly(mask, pts, 255 if img.ndim==2 else (255,255,255))
     return cv2.bitwise_and(img, mask)
@@ -81,7 +79,7 @@ def separate_left_right(lines, img_shape):
     return left, right
 
 # ---------- RANSAC 기반 곡선 보간 ----------
-def fit_and_draw_lane_ransac(frame, segments, color, thickness=8, poly_order=2):
+def fit_lane_ransac(segments):
     if len(segments)==0:
         return None
     xs, ys = [], []
@@ -90,25 +88,40 @@ def fit_and_draw_lane_ransac(frame, segments, color, thickness=8, poly_order=2):
         ys += [y1,y2]
     xs = np.array(xs)
     ys = np.array(ys)
-    # RANSAC 회귀
     ys_reshaped = ys.reshape(-1,1)
     ransac = RANSACRegressor()
     ransac.fit(ys_reshaped, xs)
+    return ransac
+
+def get_lane_points(ransac, y_bottom, y_top):
+    y_vals = np.linspace(y_bottom, y_top, y_bottom - y_top + 1)
+    x_vals = ransac.predict(y_vals.reshape(-1,1)).astype(int)
+    return x_vals, y_vals
+
+# ---------- 하늘색 영역 시각화 ----------
+def draw_lane_overlay(frame, left_segments, right_segments):
     h = frame.shape[0]
     y_bottom = int(h*ROI_BOTTOM_Y)
     y_top    = int(h*ROI_TOP_Y)
-    y_vals = np.linspace(y_bottom, y_top, num=(y_bottom-y_top+1))
-    x_vals = ransac.predict(y_vals.reshape(-1,1)).astype(int)
-    # 선 그리기
-    for i in range(len(y_vals)-1):
-        cv2.line(frame, (x_vals[i], int(y_vals[i])), (x_vals[i+1], int(y_vals[i+1])), color, thickness, cv2.LINE_AA)
-    return (x_vals[0], y_bottom, x_vals[-1], y_top)
 
-# ---------- 마스크 오버레이 ----------
-def overlay_mask(frame, binary, alpha=0.35):
-    color_mask = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
-    color_mask = (color_mask>0).astype(np.uint8) * np.array([0,255,255], np.uint8)
-    return cv2.addWeighted(frame, 1.0, color_mask, alpha, 0)
+    left_ransac = fit_lane_ransac(left_segments)
+    right_ransac = fit_lane_ransac(right_segments)
+    if left_ransac is None or right_ransac is None:
+        return frame
+
+    left_x, y_vals = get_lane_points(left_ransac, y_bottom, y_top)
+    right_x, _    = get_lane_points(right_ransac, y_bottom, y_top)
+
+    # 좌/우 점 합치기, 우측 점은 뒤집어서 시계방향
+    pts_left = np.vstack([left_x, y_vals]).T
+    pts_right = np.vstack([right_x, y_vals]).T[::-1]
+    pts = np.vstack([pts_left, pts_right])
+    pts = np.array([pts], dtype=np.int32)
+
+    overlay = frame.copy()
+    cv2.fillPoly(overlay, pts, (180,255,255))
+    result = cv2.addWeighted(frame,1.0,overlay,0.4,0)
+    return result
 
 # ---------- 메인 ----------
 def main():
@@ -134,19 +147,17 @@ def main():
         lines = detect_lines(lane_mask)
         left, right = separate_left_right(lines, frame.shape)
 
-        vis = overlay_mask(frame.copy(), lane_mask) if SHOW_BINARY else frame.copy()
-        fit_and_draw_lane_ransac(vis, left,  (0,255,0), thickness=10)
-        fit_and_draw_lane_ransac(vis, right, (0,150,255), thickness=10)
+        vis = draw_lane_overlay(frame.copy(), left, right)
 
-        h, w = vis.shape[:2]
         if SHOW_BINARY:
+            h, w = vis.shape[:2]
             small = cv2.resize(lane_mask, (w//3, h//3))
             vis[10:10+small.shape[0], w - 10 - small.shape[1]: w-10] = cv2.cvtColor(small, cv2.COLOR_GRAY2BGR)
             cv2.rectangle(vis, (w - 10 - small.shape[1], 10),
                                  (w-10, 10+small.shape[0]), (0,0,0), 2)
 
-        vis_resized = cv2.resize(vis, (int(w*SCALE), int(h*SCALE)))
-        cv2.imshow("Lane Detection RANSAC", vis_resized)
+        vis_resized = cv2.resize(vis, (int(vis.shape[1]*SCALE), int(vis.shape[0]*SCALE)))
+        cv2.imshow("Lane Detection", vis_resized)
 
         if writer is not None:
             writer.write(vis)
