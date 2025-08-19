@@ -15,8 +15,8 @@ def region_of_interest(img):
     h, w = img.shape[:2]
     pts = np.array([[ 
         (int(w*0.1), int(h*ROI_BOTTOM_Y)),
-        (int(w*0.35), int(h*ROI_TOP_Y)),   # 좌측 상단 0.35
-        (int(w*0.65), int(h*ROI_TOP_Y)),   # 우측 상단 0.65
+        (int(w*0.35), int(h*ROI_TOP_Y)),
+        (int(w*0.65), int(h*ROI_TOP_Y)),
         (int(w*0.9), int(h*ROI_BOTTOM_Y))
     ]], dtype=np.int32)
     mask = np.zeros_like(img)
@@ -90,7 +90,7 @@ def get_lane_points(model, y_bottom, y_top):
 def calibrate_and_crop_lane(frame, left_segments, right_segments):
     h, w = frame.shape[:2]
     
-    # 1. 원래 ROI 좌표 (상단 좌우 0.35/0.65)
+    # 원래 ROI 좌표
     src_pts = np.float32([
         [int(w*0.1), int(h*ROI_BOTTOM_Y)],
         [int(w*0.35), int(h*ROI_TOP_Y)],
@@ -101,7 +101,7 @@ def calibrate_and_crop_lane(frame, left_segments, right_segments):
     M = cv2.getPerspectiveTransform(src_pts, dst_pts)
     warped = cv2.warpPerspective(frame, M, (w,h))
 
-    # 2. 좌우 차선 x좌표 평균
+    # 좌우 차선 x좌표 평균
     left_xs = [x for seg in left_segments for x in [seg[0], seg[2]]]
     right_xs = [x for seg in right_segments for x in [seg[0], seg[2]]]
     if len(left_xs)==0 or len(right_xs)==0:
@@ -109,7 +109,7 @@ def calibrate_and_crop_lane(frame, left_segments, right_segments):
     left_mean = int(np.mean(left_xs))
     right_mean = int(np.mean(right_xs))
     
-    # 3. 차선 폭 기준으로 좌우 3배 폭만 ROI 지정
+    # 차선 폭 기준으로 좌우 3배 폭만 ROI 지정
     lane_width = right_mean - left_mean
     center_x = (left_mean+right_mean)//2
     x1 = max(center_x - lane_width*3, 0)
@@ -117,6 +117,26 @@ def calibrate_and_crop_lane(frame, left_segments, right_segments):
     cropped = warped[:, x1:x2]
     
     return cropped, M, x1
+
+# ---------- Warped ROI 내부 차선 연결 박스 표시 ----------
+def draw_connected_lane_boxes(warped_roi, left_segments, right_segments, box_width_ratio=0.05):
+    roi_h, roi_w = warped_roi.shape[:2]
+    overlay = warped_roi.copy()
+    box_width = max(2, int(roi_w * box_width_ratio))
+
+    left_xs = [x for seg in left_segments for x in [seg[0], seg[2]]]
+    right_xs = [x for seg in right_segments for x in [seg[0], seg[2]]]
+
+    if left_xs:
+        left_x = int(np.mean(left_xs))
+        cv2.rectangle(overlay, (left_x-box_width//2, 0), (left_x+box_width//2, roi_h), (0,255,0), -1)
+
+    if right_xs:
+        right_x = int(np.mean(right_xs))
+        cv2.rectangle(overlay, (right_x-box_width//2, 0), (right_x+box_width//2, roi_h), (0,0,255), -1)
+
+    result = cv2.addWeighted(warped_roi, 0.5, overlay, 0.5, 0)
+    return result
 
 # ---------- 하늘색 영역 시각화 ----------
 def draw_lane_overlay_curve(frame, left_segments, right_segments, prev_left_curve, prev_right_curve):
@@ -127,6 +147,7 @@ def draw_lane_overlay_curve(frame, left_segments, right_segments, prev_left_curv
     # 투시보정 후 좁은 ROI
     cropped_roi, M, roi_x1 = calibrate_and_crop_lane(frame, left_segments, right_segments)
 
+    # 좌/우 곡선 모델
     left_model = fit_lane_curve_ransac(left_segments) or prev_left_curve
     right_model = fit_lane_curve_ransac(right_segments) or prev_right_curve
 
@@ -145,28 +166,25 @@ def draw_lane_overlay_curve(frame, left_segments, right_segments, prev_left_curv
     cv2.fillPoly(overlay, pts, (180,255,255))
     result = cv2.addWeighted(frame,1.0,overlay,0.4,0)
 
-    # --- 투시 보정된 ROI 오버레이 ---
-    # 오른쪽에 작게 붙이기
-    roi_h, roi_w = cropped_roi.shape[:2]
-    scale = 0.4  # 40% 크기로 축소
-    resized_roi = cv2.resize(cropped_roi, (int(roi_w*scale), int(roi_h*scale)))
+    # Warped ROI 내부 좌/우 차선 연결 박스
+    connected_roi = draw_connected_lane_boxes(cropped_roi, left_segments, right_segments)
+    resized_roi = cv2.resize(connected_roi, (int(cropped_roi.shape[1]*0.4), int(cropped_roi.shape[0]*0.4)))
     x_offset = frame.shape[1] - resized_roi.shape[1] - 10
     y_offset = 10
     result[y_offset:y_offset+resized_roi.shape[0], x_offset:x_offset+resized_roi.shape[1]] = resized_roi
     cv2.rectangle(result, (x_offset, y_offset),
                   (x_offset+resized_roi.shape[1], y_offset+resized_roi.shape[0]),
                   (0,0,255), 2)
-    cv2.putText(result, "Warped ROI", (x_offset+5, y_offset+25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
+    cv2.putText(result, "Warped ROI Connected", (x_offset+5, y_offset+25),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,255), 2)
 
-    # 기존 미리보기 박스
+    # 미리보기 박스 (원본 ROI 마스크)
     lane_mask = threshold_binary(frame)
     small = cv2.resize(lane_mask, (frame.shape[1]//4, frame.shape[0]//4))
     result[10:10+small.shape[0], 10:10+small.shape[1]] = cv2.cvtColor(small, cv2.COLOR_GRAY2BGR)
-    cv2.rectangle(result, (10,10), (10+small.shape[1], 10+small.shape[0]), (0,0,0),2)
+    cv2.rectangle(result, (10,10), (10+small.shape[1],10+small.shape[0]), (0,0,0), 2)
 
     return result, left_model, right_model
-
 
 # ---------- 메인 ----------
 def main():
