@@ -20,20 +20,43 @@ HOUGH_MIN_LINE_LEN = 30
 HOUGH_MAX_LINE_GAP = 60
 
 # ROI 비율 (하단 사다리꼴)
-ROI_BOTTOM_Y = 0.95
+ROI_BOTTOM_Y = 1
 ROI_TOP_Y    = 0.6
-ROI_LEFT_X   = 0.1
-ROI_RIGHT_X  = 0.9
+ROI_LEFT_X   = 0.25
+ROI_RIGHT_X  = 0.85
 ROI_TOP_LEFT_X  = 0.45
 ROI_TOP_RIGHT_X = 0.55
 
-# ---------- ROI 마스크 ----------
+# 새로운 설정: 하단 중앙 노이즈를 무시하기 위한 사다리꼴 제외 영역
+EXCLUSION_BOTTOM_LEFT_X = 0.3
+EXCLUSION_BOTTOM_RIGHT_X = 0.8
+EXCLUSION_TOP_LEFT_X = 0.45
+EXCLUSION_TOP_RIGHT_X = 0.55
+EXCLUSION_TOP_Y = 0.85
+EXCLUSION_BOTTOM_Y = 1.0
+
+# 추가 설정: 두 번째 중앙 노이즈 제외 영역 (삼각형 형태)
+# 아래쪽 너비는 첫 번째 제외 영역의 상단과 동일하게 설정
+EXCLUSION_2_BOTTOM_LEFT_X = EXCLUSION_TOP_LEFT_X
+EXCLUSION_2_BOTTOM_RIGHT_X = EXCLUSION_TOP_RIGHT_X
+# 위쪽 꼭짓점의 X좌표는 중앙으로 수렴하여 삼각형을 만듦
+EXCLUSION_2_TOP_X = (EXCLUSION_2_BOTTOM_LEFT_X + EXCLUSION_2_BOTTOM_RIGHT_X) / 2
+# 아래쪽 경계는 첫 번째 제외 영역의 상단과 동일
+EXCLUSION_2_BOTTOM_Y = EXCLUSION_TOP_Y
+# 위쪽 경계 (임의로 설정)
+EXCLUSION_2_TOP_Y = 0.4
+
+
+# ---------- ROI 마스크 생성 ----------
 def region_of_interest(img):
     """
     관심 영역(ROI)을 정의하고 이미지에 적용합니다.
+    하단 중앙의 특정 영역들을 제외하여 노이즈를 제거합니다.
     """
     h, w = img.shape[:2]
-    pts = np.array([[
+    
+    # 1. 기본 차선 ROI 마스크 생성 (사다리꼴)
+    pts = np.array([[ 
         (int(w*ROI_LEFT_X),  int(h*ROI_BOTTOM_Y)),
         (int(w*ROI_TOP_LEFT_X),  int(h*ROI_TOP_Y)),
         (int(w*ROI_TOP_RIGHT_X), int(h*ROI_TOP_Y)),
@@ -41,6 +64,24 @@ def region_of_interest(img):
     ]], dtype=np.int32)
     mask = np.zeros_like(img)
     cv2.fillPoly(mask, pts, 255 if img.ndim==2 else (255,255,255))
+
+    # 2. 첫 번째 하단 중앙 노이즈 제외 영역 마스크 생성 (사다리꼴)
+    exclusion_pts_1 = np.array([[
+        (int(w*EXCLUSION_BOTTOM_LEFT_X),  int(h*EXCLUSION_BOTTOM_Y)),
+        (int(w*EXCLUSION_TOP_LEFT_X),  int(h*EXCLUSION_TOP_Y)),
+        (int(w*EXCLUSION_TOP_RIGHT_X), int(h*EXCLUSION_TOP_Y)),
+        (int(w*EXCLUSION_BOTTOM_RIGHT_X), int(h*EXCLUSION_BOTTOM_Y))
+    ]], dtype=np.int32)
+    cv2.fillPoly(mask, exclusion_pts_1, 0)
+
+    # 3. 두 번째 중앙 노이즈 제외 영역 마스크 생성 (삼각형)
+    exclusion_pts_2 = np.array([[
+        (int(w*EXCLUSION_2_BOTTOM_LEFT_X), int(h*EXCLUSION_2_BOTTOM_Y)),
+        (int(w*EXCLUSION_2_BOTTOM_RIGHT_X), int(h*EXCLUSION_2_BOTTOM_Y)),
+        (int(w*EXCLUSION_2_TOP_X), int(h*EXCLUSION_2_TOP_Y))
+    ]], dtype=np.int32)
+    cv2.fillPoly(mask, exclusion_pts_2, 0)
+    
     return cv2.bitwise_and(img, mask)
 
 # ---------- 차선 이진화 ----------
@@ -95,8 +136,7 @@ def separate_left_right(lines, img_shape):
         # 기울기가 너무 수평이거나 수직인 선분은 제외
         if abs(slope) < 0.3 or abs(slope) > 10:
             continue
-        # 수정된 부분: 중앙 영역(40% ~ 60%)에 있는 선분은 제외
-        # 왼쪽 차선은 음수 기울기, 오른쪽 차선은 양수 기울기
+        # 중앙 영역(40% ~ 60%)에 있는 선분은 무시
         if slope < 0 and max(x1,x2) < w*0.4:
             left.append((x1,y1,x2,y2))
         elif slope > 0 and min(x1,x2) > w*0.6:
@@ -127,14 +167,42 @@ def fit_and_draw_lane(frame, segments, color, thickness=8):
     cv2.line(frame, (x_bottom, y_bottom), (x_top, y_top), color, thickness, cv2.LINE_AA)
     return (x_bottom, y_bottom, x_top, y_top)
 
-# ---------- 마스크 오버레이 ----------
-def overlay_mask(frame, binary, alpha=0.35):
+# ---------- ROI 및 제외 영역 시각화 ----------
+def visualize_roi(frame):
     """
-    차선 마스크를 원본 영상에 투명하게 겹쳐서 보여줍니다.
+    ROI와 제외 영역을 색깔 있는 투명한 폴리곤으로 시각화합니다.
     """
-    color_mask = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
-    color_mask = (color_mask>0).astype(np.uint8) * np.array([0,255,255], np.uint8)
-    return cv2.addWeighted(frame, 1.0, color_mask, alpha, 0)
+    h, w = frame.shape[:2]
+    overlay = np.zeros_like(frame, np.uint8)
+    
+    # 1. ROI 영역을 초록색으로 채우기
+    roi_pts = np.array([[ 
+        (int(w*ROI_LEFT_X),  int(h*ROI_BOTTOM_Y)),
+        (int(w*ROI_TOP_LEFT_X),  int(h*ROI_TOP_Y)),
+        (int(w*ROI_TOP_RIGHT_X), int(h*ROI_TOP_Y)),
+        (int(w*ROI_RIGHT_X), int(h*ROI_BOTTOM_Y))
+    ]], dtype=np.int32)
+    cv2.fillPoly(overlay, roi_pts, (0, 255, 0)) # 초록색
+
+    # 2. 첫 번째 제외 영역을 빨간색으로 채우기
+    exclusion_pts_1 = np.array([[
+        (int(w*EXCLUSION_BOTTOM_LEFT_X),  int(h*EXCLUSION_BOTTOM_Y)),
+        (int(w*EXCLUSION_TOP_LEFT_X),  int(h*EXCLUSION_TOP_Y)),
+        (int(w*EXCLUSION_TOP_RIGHT_X), int(h*EXCLUSION_TOP_Y)),
+        (int(w*EXCLUSION_BOTTOM_RIGHT_X), int(h*EXCLUSION_BOTTOM_Y))
+    ]], dtype=np.int32)
+    cv2.fillPoly(overlay, exclusion_pts_1, (0, 0, 255)) # 빨간색
+
+    # 3. 두 번째 제외 영역을 빨간색으로 채우기
+    exclusion_pts_2 = np.array([[
+        (int(w*EXCLUSION_2_BOTTOM_LEFT_X), int(h*EXCLUSION_2_BOTTOM_Y)),
+        (int(w*EXCLUSION_2_BOTTOM_RIGHT_X), int(h*EXCLUSION_2_BOTTOM_Y)),
+        (int(w*EXCLUSION_2_TOP_X), int(h*EXCLUSION_2_TOP_Y))
+    ]], dtype=np.int32)
+    cv2.fillPoly(overlay, exclusion_pts_2, (0, 0, 255)) # 빨간색
+    
+    # 원본 이미지와 오버레이를 겹쳐서 반환
+    return cv2.addWeighted(frame, 1.0, overlay, 0.3, 0)
 
 # ---------- 메인 ----------
 def main():
@@ -159,18 +227,23 @@ def main():
         lane_mask = threshold_binary(frame)
         lines = detect_lines(lane_mask)
         left, right = separate_left_right(lines, frame.shape)
-
-        vis = overlay_mask(frame.copy(), lane_mask) if SHOW_BINARY else frame.copy()
+        
+        # 1. ROI/제외 영역 시각화
+        vis = visualize_roi(frame.copy())
+        
+        # 2. 감지된 차선 그리기
         fit_and_draw_lane(vis, left,  (0,255,0), thickness=10)
         fit_and_draw_lane(vis, right, (0,150,255), thickness=10)
 
         h, w = vis.shape[:2]
-        # 작은 창 미리보기
+        # 3. 이진 마스크를 작은 창으로 미리보기
         if SHOW_BINARY:
             small = cv2.resize(lane_mask, (w//3, h//3))
-            vis[10:10+small.shape[0], w - 10 - small.shape[1]: w-10] = cv2.cvtColor(small, cv2.COLOR_GRAY2BGR)
-            cv2.rectangle(vis, (w - 10 - small.shape[1], 10),
-                                 (w-10, 10+small.shape[0]), (0,0,0), 2)
+            # 이진 마스크를 3채널 컬러 이미지로 변환
+            small_bgr = cv2.cvtColor(small, cv2.COLOR_GRAY2BGR)
+            vis[10:10+small_bgr.shape[0], w - 10 - small_bgr.shape[1]: w-10] = small_bgr
+            cv2.rectangle(vis, (w - 10 - small_bgr.shape[1], 10),
+                                 (w-10, 10+small_bgr.shape[0]), (0,0,0), 2)
 
         vis_resized = cv2.resize(vis, (int(w*SCALE), int(h*SCALE)))
         cv2.imshow("Lane Detection (Fixed ROI)", vis_resized)
