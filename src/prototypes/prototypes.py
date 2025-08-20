@@ -29,8 +29,11 @@ ROI_TOP_RIGHT_X = 0.55
 
 # ---------- ROI 마스크 ----------
 def region_of_interest(img):
+    """
+    관심 영역(ROI)을 정의하고 이미지에 적용합니다.
+    """
     h, w = img.shape[:2]
-    pts = np.array([[ 
+    pts = np.array([[
         (int(w*ROI_LEFT_X),  int(h*ROI_BOTTOM_Y)),
         (int(w*ROI_TOP_LEFT_X),  int(h*ROI_TOP_Y)),
         (int(w*ROI_TOP_RIGHT_X), int(h*ROI_TOP_Y)),
@@ -42,6 +45,9 @@ def region_of_interest(img):
 
 # ---------- 차선 이진화 ----------
 def threshold_binary(frame):
+    """
+    HLS S채널과 Sobel X를 결합하여 차선이 될만한 부분을 이진화합니다.
+    """
     blur = cv2.GaussianBlur(frame, (GAUSS_KSIZE, GAUSS_KSIZE), 0)
     # HLS S채널
     hls = cv2.cvtColor(blur, cv2.COLOR_BGR2HLS)
@@ -62,6 +68,9 @@ def threshold_binary(frame):
 
 # ---------- 허프 직선 ----------
 def detect_lines(binary):
+    """
+    이진화된 이미지에서 허프 변환을 사용하여 선분을 검출합니다.
+    """
     edges = cv2.Canny(binary, 50, 150)
     lines = cv2.HoughLinesP(edges, 1, np.pi/180, HOUGH_THRESH,
                             minLineLength=HOUGH_MIN_LINE_LEN,
@@ -70,6 +79,10 @@ def detect_lines(binary):
 
 # ---------- 좌/우 차선 분리 ----------
 def separate_left_right(lines, img_shape):
+    """
+    기울기와 위치를 기준으로 선분을 좌/우 차선으로 분리합니다.
+    중앙 영역의 선분은 무시합니다.
+    """
     left, right = [], []
     h, w = img_shape[:2]
     if lines is None:
@@ -79,16 +92,22 @@ def separate_left_right(lines, img_shape):
         if x2==x1:
             continue
         slope = (y2 - y1) / (x2 - x1 + 1e-6)
+        # 기울기가 너무 수평이거나 수직인 선분은 제외
         if abs(slope) < 0.3 or abs(slope) > 10:
             continue
-        if slope < 0 and max(x1,x2) < w*0.55:
+        # 수정된 부분: 중앙 영역(40% ~ 60%)에 있는 선분은 제외
+        # 왼쪽 차선은 음수 기울기, 오른쪽 차선은 양수 기울기
+        if slope < 0 and max(x1,x2) < w*0.4:
             left.append((x1,y1,x2,y2))
-        elif slope > 0 and min(x1,x2) > w*0.45:
+        elif slope > 0 and min(x1,x2) > w*0.6:
             right.append((x1,y1,x2,y2))
     return left, right
 
 # ---------- 점선 자연 연결 ----------
 def fit_and_draw_lane(frame, segments, color, thickness=8):
+    """
+    선분들을 회귀 분석하여 하나의 차선으로 연결하고 그립니다.
+    """
     if len(segments) == 0:
         return None
     xs, ys = [], []
@@ -110,6 +129,9 @@ def fit_and_draw_lane(frame, segments, color, thickness=8):
 
 # ---------- 마스크 오버레이 ----------
 def overlay_mask(frame, binary, alpha=0.35):
+    """
+    차선 마스크를 원본 영상에 투명하게 겹쳐서 보여줍니다.
+    """
     color_mask = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
     color_mask = (color_mask>0).astype(np.uint8) * np.array([0,255,255], np.uint8)
     return cv2.addWeighted(frame, 1.0, color_mask, alpha, 0)
