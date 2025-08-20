@@ -14,9 +14,9 @@ ROI_TOP_Y    = 0.6
 def region_of_interest(img):
     h, w = img.shape[:2]
 
-    # 위쪽 좌우폭 기존 대비 조금 넓혀 투시감 강화
-    top_left_x = int(w*0.35)  # 기존 0.35에서 그대로
-    top_right_x = int(w*0.65) # 기존 0.65에서 그대로
+    # 위쪽 좌우폭 반으로 줄임 (기존 대비)
+    top_left_x = int(w*0.35 + (w*0.65-w*0.35)/4)
+    top_right_x = int(w*0.65 - (w*0.65-w*0.35)/4)
 
     # 아래쪽 좌우폭 그대로
     bottom_left_x = int(w*0.1)
