@@ -17,7 +17,7 @@ TRAPEZOID_BOTTOM_WIDTH = 400
 
 # YOLO 모델 로드
 try:
-    model = YOLO('yolo11n', device="cuda:0")
+    model = YOLO('yolo11n')
 except Exception as e:
     print(f"YOLO 모델 로드 중 오류: {e}")
     model = None
