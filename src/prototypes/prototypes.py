@@ -7,7 +7,7 @@ import torch
 # ========= 설정 =========
 VIDEO_PATH = 0  # 웹캠 사용
 SAVE_OUTPUT = False
-OUTPUT_PATH = "optimized_output_perspective.mp4"
+OUTPUT_PATH = "optimized_blink_onoff.mp4"
 SCALE = 1.0
 TRAPEZOID_TOP_Y = 0.6
 TRAPEZOID_BOTTOM_Y = 1.0
@@ -26,6 +26,9 @@ except Exception as e:
 
 torch.set_num_threads(4)  # CPU 스레드 설정
 
+# 이전 프레임 밝기 저장용
+prev_obj_gray = {}
+
 # ---------- 고정 사다리꼴 ----------
 def calculate_fixed_trapezoid(frame_shape):
     h, w = frame_shape[:2]
@@ -36,7 +39,7 @@ def calculate_fixed_trapezoid(frame_shape):
     top_right_x = cx + TRAPEZOID_TOP_WIDTH // 2
     bottom_left_x = cx - TRAPEZOID_BOTTOM_WIDTH // 2
     bottom_right_x = cx + TRAPEZOID_BOTTOM_WIDTH // 2
-    return np.array([[
+    return np.array([[ 
         (bottom_left_x, bottom_y),
         (top_left_x, top_y),
         (top_right_x, top_y),
@@ -49,19 +52,28 @@ def visualize_only(frame, trapezoid_pts):
     cv2.fillPoly(overlay, trapezoid_pts, (0, 255, 0))
     return cv2.addWeighted(frame, 1.0, overlay, 0.3, 0)
 
-# ---------- YOLO 인식 범위 화면 중앙 기준 상하 50% , 좌우 80% 크롭 ----------
+# ---------- 중앙 기준 상하 50%, 좌우 80% 크롭 ----------
 def crop_center(frame, scale_x=0.8, scale_y=0.5):
     h, w = frame.shape[:2]
     new_w, new_h = int(w*scale_x), int(h*scale_y)
     start_x, start_y = w//2 - new_w//2, h//2 - new_h//2
     return frame[start_y:start_y+new_h, start_x:start_x+new_w], (start_x, start_y)
 
-
-# ---------- 깜빡이 여부 판단 (밝기 변화 기반) ----------
-def check_turn_signal_any_color(obj_crop):
+# ---------- 깜빡이 여부 판단 (프레임 차이 + HSV V 채널 최대값) ----------
+def check_turn_signal_combined(obj_crop, obj_id):
     gray = cv2.cvtColor(obj_crop, cv2.COLOR_BGR2GRAY)
-    mean_intensity = np.mean(gray)
-    return mean_intensity > 50  # 밝으면 깜빡이 있다고 판단
+    # 1️⃣ 프레임 차이 기반
+    prev_mean = prev_obj_gray.get(obj_id, np.mean(gray))
+    curr_mean = np.mean(gray)
+    diff_blink = abs(curr_mean - prev_mean) > 30
+    prev_obj_gray[obj_id] = curr_mean
+
+    # 2️⃣ HSV 최대값 기반
+    hsv = cv2.cvtColor(obj_crop, cv2.COLOR_BGR2HSV)
+    v_max = np.max(hsv[:,:,2])
+    hsv_blink = v_max > 200
+
+    return diff_blink or hsv_blink
 
 # ---------- ROI 제외 영역 탐지 ----------
 def detect_side_objects(cropped, roi_mask):
@@ -77,25 +89,20 @@ def detect_side_objects(cropped, roi_mask):
 
 # ---------- 원근감 기준 좌우 가장 가까운 객체 선택 ----------
 def select_closest_objects_perspective(side_objects, frame_width):
-    left_obj = None
-    right_obj = None
-    left_max_y = -1
-    right_max_y = -1
+    left_obj, right_obj = None, None
+    left_max_y, right_max_y = -1, -1
     center_x = frame_width // 2
-
     for x1, y1, x2, y2 in side_objects:
         obj_cx = (x1 + x2) // 2
         obj_bottom = y2  # 원근감 기준: y2가 클수록 가까움
-
-        if obj_cx < center_x:  # 좌측
+        if obj_cx < center_x:
             if obj_bottom > left_max_y:
                 left_max_y = obj_bottom
                 left_obj = (x1, y1, x2, y2)
-        else:  # 우측
+        else:
             if obj_bottom > right_max_y:
                 right_max_y = obj_bottom
                 right_obj = (x1, y1, x2, y2)
-
     selected = []
     if left_obj: selected.append(left_obj)
     if right_obj: selected.append(right_obj)
@@ -130,7 +137,7 @@ def main():
         if not ret:
             break
 
-        cropped, (ox, oy) = crop_center(frame, 0.5)
+        cropped, (ox, oy) = crop_center(frame, 0.8, 0.5)
 
         # ROI 마스크 생성
         roi_mask = np.zeros(cropped.shape[:2], dtype=np.uint8)
@@ -141,14 +148,14 @@ def main():
             side_objects = detect_side_objects(cropped, roi_mask)
             prev_side_objects = select_closest_objects_perspective(side_objects, cropped.shape[1])
 
-        # 박스 그리기 + 깜빡이 확인
+        # 박스 그리기 + 깜빡이 확인 (ON/OFF 표시)
         processed_crop = cropped.copy()
-        for x1, y1, x2, y2 in prev_side_objects:
+        for idx, (x1, y1, x2, y2) in enumerate(prev_side_objects):
             obj_crop = processed_crop[y1:y2, x1:x2]
-            blink = check_turn_signal_any_color(obj_crop)
+            blink = check_turn_signal_combined(obj_crop, idx)
             color = (0,255,0) if blink else (0,0,255)
             cv2.rectangle(processed_crop, (x1,y1), (x2,y2), color, 2)
-            text = f"B:{int(blink)}"
+            text = "ON" if blink else "OFF"
             cv2.putText(processed_crop, text, (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
         frame[oy:oy+processed_crop.shape[0], ox:ox+processed_crop.shape[1]] = processed_crop
