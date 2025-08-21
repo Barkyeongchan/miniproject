@@ -17,6 +17,7 @@ TRAPEZOID_BOTTOM_WIDTH = 400
 
 EVENT_PRE_SEC = 3
 EVENT_POST_SEC = 3
+EVENT_IGNORE_SEC = 5  # 이벤트 간 최소 간격
 EVENT_SAVE_PATH = "../../img"
 os.makedirs(EVENT_SAVE_PATH, exist_ok=True)
 
@@ -118,8 +119,11 @@ def select_closest_objects_perspective(side_objects, frame_width):
 # ---------- 사다리꼴 ROI 안에 있는지 확인 ----------
 def is_in_trapezoid(obj_box, trapezoid_pts):
     x1, y1, x2, y2 = obj_box
-    obj_cx, obj_cy = (x1 + x2)//2, (y1 + y2)//2
-    return cv2.pointPolygonTest(trapezoid_pts[0], (obj_cx, obj_cy), False) >= 0
+    obj_cx = (x1 + x2) // 2
+    # 차량 박스의 상단에서 2/3 지점의 y 좌표를 계산
+    test_y = y1 + (y2 - y1) * (2/3)
+    # 계산된 점이 사다리꼴 ROI 안에 있는지 테스트
+    return cv2.pointPolygonTest(trapezoid_pts[0], (obj_cx, test_y), False) >= 0
 
 # ---------- 이벤트 영상 저장 ----------
 def save_event_video(frames, fps):
@@ -143,7 +147,7 @@ def main():
     event_recording = False
     event_frames = []
     post_counter = 0
-    event_index = 0
+    last_event_time = 0  # 마지막 이벤트 발생 시간 기록
 
     ret, frame = cap.read()
     if not ret:
@@ -182,11 +186,15 @@ def main():
             cv2.putText(processed_frame, text, (x1, y1-5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
+            # 수정된 is_in_trapezoid 함수 사용
             if not blink and is_in_trapezoid((x1, y1, x2, y2), trapezoid_pts):
-                event = True
-                cv2.putText(processed_frame, "EVENT",
-                            (frame.shape[1]//2 - 60, frame.shape[0]//2),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0,0,255), 4)
+                current_time = time.time()
+                if current_time - last_event_time >= EVENT_IGNORE_SEC:
+                    event = True
+                    last_event_time = current_time
+                    cv2.putText(processed_frame, "EVENT",
+                                (frame.shape[1]//2 - 60, frame.shape[0]//2),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0,0,255), 4)
 
         # 이벤트 처리
         if event:
@@ -194,7 +202,6 @@ def main():
                 event_recording = True
                 event_frames = list(frame_buffer)
                 post_counter = 0
-                event_index += 1
 
         if event_recording:
             event_frames.append(frame.copy())
