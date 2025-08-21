@@ -1,100 +1,104 @@
 import cv2
 import numpy as np
+import time
 
 # ========= 설정 =========
 VIDEO_PATH = "../../assets/drive_sample.mp4"  # 영상 경로
-SAVE_OUTPUT = False         # 결과 저장 여부
-OUTPUT_PATH = "fixed_central_roi_output.mp4"
-SCALE = 0.6                 # 출력 창 크기 비율
-
-# 고정 사다리꼴의 기본 설정값
+SAVE_OUTPUT = False
+OUTPUT_PATH = "fixed_30fps_output.mp4"
+SCALE = 0.6
 TRAPEZOID_TOP_Y = 0.6
 TRAPEZOID_BOTTOM_Y = 1.0
-TRAPEZOID_TOP_WIDTH = 30   # 위쪽 너비 (픽셀 단위)
-TRAPEZOID_BOTTOM_WIDTH = 600 # 아래쪽 너비 (픽셀 단위)
+TRAPEZOID_TOP_WIDTH = 30
+TRAPEZOID_BOTTOM_WIDTH = 600
 
-# ---------- 고정된 사다리꼴 좌표 계산 ----------
 def calculate_fixed_trapezoid(frame_shape):
-    """
-    화면 중앙에 고정된 사다리꼴 ROI의 좌표를 계산합니다.
-    """
     h, w = frame_shape[:2]
-    
-    # 화면 중앙을 기준으로 사다리꼴 좌표 계산
     center_x = w // 2
-
     top_y = int(h * TRAPEZOID_TOP_Y)
     bottom_y = int(h * TRAPEZOID_BOTTOM_Y)
-
-    # 중심점을 기준으로 좌우 좌표를 설정
     top_left_x = center_x - TRAPEZOID_TOP_WIDTH // 2
     top_right_x = center_x + TRAPEZOID_TOP_WIDTH // 2
     bottom_left_x = center_x - TRAPEZOID_BOTTOM_WIDTH // 2
     bottom_right_x = center_x + TRAPEZOID_BOTTOM_WIDTH // 2
-
-    # 좌표를 numpy 배열로 저장
     trapezoid_pts = np.array([[
         (bottom_left_x, bottom_y),
         (top_left_x, top_y),
         (top_right_x, top_y),
         (bottom_right_x, bottom_y)
     ]], dtype=np.int32)
-
     return trapezoid_pts
 
-# ---------- ROI 시각화만 수행 ----------
 def visualize_only(frame, trapezoid_pts):
-    """
-    고정된 사다리꼴을 시각화합니다.
-    이전의 텍스트와 원 표시 기능을 제거했습니다.
-    """
     overlay = np.zeros_like(frame, np.uint8)
-    
-    # 사다리꼴 ROI를 초록색으로 채우기
     cv2.fillPoly(overlay, trapezoid_pts, (0, 255, 0))
-    result = cv2.addWeighted(frame, 1.0, overlay, 0.3, 0)
-    
-    return result
+    return cv2.addWeighted(frame, 1.0, overlay, 0.3, 0)
 
-# ---------- 메인 루프 ----------
 def main():
     cap = cv2.VideoCapture(VIDEO_PATH)
     if not cap.isOpened():
         print("비디오를 열 수 없습니다:", VIDEO_PATH)
         return
 
+    target_fps = 30
+    frame_time = 1.0 / target_fps
+    next_frame_time = time.time()
+
     writer = None
     if SAVE_OUTPUT:
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(OUTPUT_PATH, fourcc, fps, (w,h))
+        writer = cv2.VideoWriter(OUTPUT_PATH, fourcc, target_fps, (w, h))
 
-    # 고정된 ROI는 한 번만 계산합니다.
     ret, frame = cap.read()
     if not ret:
         print("비디오 첫 프레임을 읽을 수 없습니다.")
         return
-        
     trapezoid_points = calculate_fixed_trapezoid(frame.shape)
 
+    # --- FPS 측정용 ---
+    frame_counter = 0
+    fps_timer = time.time()
+    actual_fps = 0.0
+
     while True:
+        # --- 다음 프레임 표시할 시간까지 대기 ---
+        sleep_time = next_frame_time - time.time()
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+
+        next_frame_time += frame_time  # 다음 목표 시간 업데이트
+
         ret, frame = cap.read()
         if not ret:
             break
-        
-        # 고정된 사다리꼴을 시각화만 합니다.
+
         processed_frame = visualize_only(frame, trapezoid_points)
-                             
-        vis_resized = cv2.resize(processed_frame, (int(processed_frame.shape[1]*SCALE), int(processed_frame.shape[0]*SCALE)))
-        cv2.imshow("Fixed Central ROI", vis_resized)
+
+        # --- 실제 FPS 계산 ---
+        frame_counter += 1
+        if time.time() - fps_timer >= 1.0:
+            actual_fps = frame_counter / (time.time() - fps_timer)
+            frame_counter = 0
+            fps_timer = time.time()
+
+        # FPS 표시 (왼쪽 상단)
+        cv2.putText(processed_frame,
+                    f"FPS: {actual_fps:.2f}",
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1,
+                    (255, 255, 255), 2, cv2.LINE_AA)
+
+        vis_resized = cv2.resize(processed_frame,
+                                 (int(processed_frame.shape[1] * SCALE),
+                                  int(processed_frame.shape[0] * SCALE)))
+        cv2.imshow("Drive", vis_resized)
 
         if writer is not None:
             writer.write(processed_frame)
 
-        key = cv2.waitKey(1) & 0xFF
-        if key==27 or key==ord('q'):
+        if cv2.waitKey(1) & 0xFF in [27, ord('q')]:
             break
 
     cap.release()
@@ -102,5 +106,5 @@ def main():
         writer.release()
     cv2.destroyAllWindows()
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
