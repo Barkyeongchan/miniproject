@@ -17,7 +17,7 @@ TRAPEZOID_BOTTOM_WIDTH = 400
 
 # YOLO 모델 로드
 try:
-    model = YOLO('yolo11n.pt')
+    model = YOLO('yolo11n')
 except Exception as e:
     print(f"YOLO 모델을 로드하는 중 오류가 발생했습니다: {e}")
     model = None
@@ -51,8 +51,8 @@ def visualize_only(frame, trapezoid_pts):
     result = cv2.addWeighted(frame, 1.0, overlay, 0.3, 0)
     return result
 
-# ---------- 중앙 60% 영역 크롭 ----------
-def crop_center(frame, scale=0.6):
+# ---------- 중앙 50% 영역 크롭 ----------
+def crop_center(frame, scale=0.5):
     h, w = frame.shape[:2]
     new_w = int(w * scale)
     new_h = int(h * scale)
@@ -95,7 +95,7 @@ def main():
             break
 
         # 중앙 60%만 크롭
-        cropped, (offset_x, offset_y) = crop_center(frame, scale=0.6)
+        cropped, (offset_x, offset_y) = crop_center(frame, scale=0.5)
 
         # YOLO 탐지 (중앙 60% 영역만)
         if model:
