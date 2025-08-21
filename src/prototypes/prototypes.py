@@ -49,12 +49,13 @@ def visualize_only(frame, trapezoid_pts):
     cv2.fillPoly(overlay, trapezoid_pts, (0, 255, 0))
     return cv2.addWeighted(frame, 1.0, overlay, 0.3, 0)
 
-# ---------- 중앙 50% 크롭 ----------
-def crop_center(frame, scale=0.5):
+# ---------- YOLO 인식 범위 화면 중앙 기준 상하 50% , 좌우 80% 크롭 ----------
+def crop_center(frame, scale_x=0.8, scale_y=0.5):
     h, w = frame.shape[:2]
-    new_w, new_h = int(w*scale), int(h*scale)
+    new_w, new_h = int(w*scale_x), int(h*scale_y)
     start_x, start_y = w//2 - new_w//2, h//2 - new_h//2
     return frame[start_y:start_y+new_h, start_x:start_x+new_w], (start_x, start_y)
+
 
 # ---------- 깜빡이 여부 판단 (밝기 변화 기반) ----------
 def check_turn_signal_any_color(obj_crop):
