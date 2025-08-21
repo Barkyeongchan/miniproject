@@ -14,6 +14,9 @@ TRAPEZOID_BOTTOM_Y = 1.0
 TRAPEZOID_TOP_WIDTH = 30
 TRAPEZOID_BOTTOM_WIDTH = 400
 
+# 차량 클래스 인덱스 (YOLOv8n 기준)
+VEHICLE_CLASSES = [2, 3, 5, 7]  # car, motorcycle, bus, truck
+
 # YOLO 모델 로드
 try:
     model = YOLO('yolov8n.pt')  # 가벼운 n 모델
@@ -34,7 +37,7 @@ def calculate_fixed_trapezoid(frame_shape):
     top_right_x = cx + TRAPEZOID_TOP_WIDTH // 2
     bottom_left_x = cx - TRAPEZOID_BOTTOM_WIDTH // 2
     bottom_right_x = cx + TRAPEZOID_BOTTOM_WIDTH // 2
-    return np.array([[
+    return np.array([[  # 단일 사다리꼴
         (bottom_left_x, bottom_y),
         (top_left_x, top_y),
         (top_right_x, top_y),
@@ -94,7 +97,6 @@ def main():
 
     frame_count = 0
     start_time = time.time()
-
     DETECTION_INTERVAL = 2  # 2프레임마다 YOLO 호출
     prev_detections = []
 
@@ -111,13 +113,13 @@ def main():
             prev_detections = []
             for r in results:
                 for box, cls in zip(r.boxes.xyxy, r.boxes.cls):
-                    if int(cls)==2:  # car
+                    if int(cls) in VEHICLE_CLASSES:
                         prev_detections.append(list(map(int, box)))
 
-        # 직접 박스 그리기 + 깜빡이 확인
+        # 박스 그리기 + 깜빡이 확인
         processed_crop = cropped.copy()
         for box in prev_detections:
-            x1,y1,x2,y2 = box
+            x1, y1, x2, y2 = box
             car_crop = processed_crop[y1:y2, x1:x2]
             left_on, right_on = check_turn_signal(car_crop)
             color = (0,255,0) if left_on or right_on else (0,0,255)
@@ -129,10 +131,10 @@ def main():
         # 원본 반영
         frame[oy:oy+processed_crop.shape[0], ox:ox+processed_crop.shape[1]] = processed_crop
 
-        # ROI
+        # ROI 시각화
         processed_frame = visualize_only(frame, trapezoid_pts)
 
-        # FPS
+        # FPS 표시
         frame_count += 1
         elapsed = time.time() - start_time
         actual_fps = frame_count / elapsed if elapsed>0 else 0
