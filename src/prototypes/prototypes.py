@@ -10,7 +10,7 @@ SCALE = 0.6                 # 출력 창 크기 비율
 # 고정 사다리꼴의 기본 설정값
 TRAPEZOID_TOP_Y = 0.6
 TRAPEZOID_BOTTOM_Y = 1.0
-TRAPEZOID_TOP_WIDTH = 100   # 위쪽 너비 (픽셀 단위)
+TRAPEZOID_TOP_WIDTH = 30   # 위쪽 너비 (픽셀 단위)
 TRAPEZOID_BOTTOM_WIDTH = 600 # 아래쪽 너비 (픽셀 단위)
 
 # ---------- 고정된 사다리꼴 좌표 계산 ----------
