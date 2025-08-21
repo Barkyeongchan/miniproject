@@ -10,14 +10,14 @@ from threading import Thread
 # ========= 설정 =========
 VIDEO_PATH = 0  # 웹캠 사용
 SCALE = 1.0
-TRAPEZOID_TOP_Y = 0.6
+TRAPEZOID_TOP_Y = 0.8  # 사다리꼴 상단 Y축 좌표 (비율)
 TRAPEZOID_BOTTOM_Y = 1.0
-TRAPEZOID_TOP_WIDTH = 30
+TRAPEZOID_TOP_WIDTH = 170
 TRAPEZOID_BOTTOM_WIDTH = 400
 
 EVENT_PRE_SEC = 3
 EVENT_POST_SEC = 3
-EVENT_IGNORE_SEC = 5  # 이벤트 간 최소 간격
+EVENT_IGNORE_SEC = 5
 EVENT_SAVE_PATH = "../../img"
 os.makedirs(EVENT_SAVE_PATH, exist_ok=True)
 
@@ -32,9 +32,6 @@ except Exception as e:
 
 torch.set_num_threads(4)
 
-# ---------- LED 상태 저장 ----------
-led_history = {}
-
 # ---------- 고정 사다리꼴 ----------
 def calculate_fixed_trapezoid(frame_shape):
     h, w = frame_shape[:2]
@@ -45,7 +42,7 @@ def calculate_fixed_trapezoid(frame_shape):
     top_right_x = cx + TRAPEZOID_TOP_WIDTH // 2
     bottom_left_x = cx - TRAPEZOID_BOTTOM_WIDTH // 2
     bottom_right_x = cx + TRAPEZOID_BOTTOM_WIDTH // 2
-    return np.array([[ 
+    return np.array([[
         (bottom_left_x, bottom_y),
         (top_left_x, top_y),
         (top_right_x, top_y),
@@ -57,32 +54,6 @@ def visualize_only(frame, trapezoid_pts):
     overlay = np.zeros_like(frame, np.uint8)
     cv2.fillPoly(overlay, trapezoid_pts, (0, 255, 0))
     return cv2.addWeighted(frame, 1.0, overlay, 0.3, 0)
-
-# ---------- LED 후보 영역 추출 ----------
-def get_led_roi(obj_crop, side='left'):
-    h, w = obj_crop.shape[:2]
-    if side == 'left':
-        roi = obj_crop[:, :w//5]
-    else:
-        roi = obj_crop[:, -w//5:]
-    return roi
-
-# ---------- LED 깜빡임 판정 ----------
-def is_blinking(obj_id_side, led_roi):
-    hsv = cv2.cvtColor(led_roi, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, np.array([10,100,200]), np.array([25,255,255]))
-    bright = int(cv2.countNonZero(mask) > 5)
-    
-    history = led_history.get(obj_id_side, [])
-    history.append(bright)
-    if len(history) > 5:
-        history = history[-5:]
-    
-    led_history[obj_id_side] = history
-    
-    if 1 in history and 0 in history and history.count(1) >= 1 and history.count(0) >= 1:
-        return True
-    return False
 
 # ---------- 차량 탐지 ----------
 def detect_side_objects(frame):
@@ -116,14 +87,54 @@ def select_closest_objects_perspective(side_objects, frame_width):
     if right_obj: selected.append(('right', right_obj))
     return selected
 
-# ---------- 사다리꼴 ROI 안에 있는지 확인 ----------
-def is_in_trapezoid(obj_box, trapezoid_pts):
-    x1, y1, x2, y2 = obj_box
-    obj_cx = (x1 + x2) // 2
-    # 차량 박스의 상단에서 2/3 지점의 y 좌표를 계산
-    test_y = y1 + (y2 - y1) * (2/3)
-    # 계산된 점이 사다리꼴 ROI 안에 있는지 테스트
-    return cv2.pointPolygonTest(trapezoid_pts[0], (obj_cx, test_y), False) >= 0
+# ---------- 이벤트 판단 (OpenCV만 사용) ----------
+def is_event_by_bbox(bbox, trapezoid_pts, top_hit_flags):
+    x1, y1, x2, y2 = bbox
+
+    # ROI 마스크 크기: ROI와 바운딩 박스를 모두 포함
+    h = max(trapezoid_pts[:,:,1].max(), y2) + 5
+    w = max(trapezoid_pts[:,:,0].max(), x2) + 5
+    roi_mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.fillPoly(roi_mask, trapezoid_pts, 1)
+
+    event = False
+
+    # 좌변 체크
+    for yy in range(y1, y2+1):
+        if yy >= h or x1 >= w:
+            continue
+        if roi_mask[yy, x1]:
+            top_hit_flags['left'] = True
+            event = True
+            break
+
+    # 우변 체크
+    for yy in range(y1, y2+1):
+        if yy >= h or x2 >= w:
+            continue
+        if roi_mask[yy, x2]:
+            top_hit_flags['right'] = True
+            event = True
+            break
+
+    # 상단: 좌/우 먼저 안 겹쳤으면 제외
+    if not (top_hit_flags['left'] or top_hit_flags['right']):
+        for xx in range(x1, x2+1):
+            if xx >= w or y1 >= h:
+                continue
+            if roi_mask[y1, xx]:
+                return False
+
+    # 하단 체크
+    if not event:
+        for xx in range(x1, x2+1):
+            if xx >= w or y2 >= h:
+                continue
+            if roi_mask[y2, xx]:
+                event = True
+                break
+
+    return event
 
 # ---------- 이벤트 영상 저장 ----------
 def save_event_video(frames, fps):
@@ -147,7 +158,7 @@ def main():
     event_recording = False
     event_frames = []
     post_counter = 0
-    last_event_time = 0  # 마지막 이벤트 발생 시간 기록
+    last_event_time = 0
 
     ret, frame = cap.read()
     if not ret:
@@ -159,6 +170,7 @@ def main():
     start_time = time.time()
     DETECTION_INTERVAL = 2
     prev_side_objects = []
+    top_hit_flags = {'left': False, 'right': False}
 
     while True:
         ret, frame = cap.read()
@@ -166,6 +178,7 @@ def main():
             break
 
         frame_buffer.append(frame.copy())
+        event = False
 
         # 차량 탐지
         if frame_count % DETECTION_INTERVAL == 0:
@@ -173,21 +186,10 @@ def main():
             prev_side_objects = select_closest_objects_perspective(side_objects, frame.shape[1])
 
         processed_frame = frame.copy()
-        event = False
 
         for idx, (side, (x1, y1, x2, y2)) in enumerate(prev_side_objects):
-            obj_crop = processed_frame[y1:y2, x1:x2]
-            roi = get_led_roi(obj_crop, side)
-            obj_id_side = f"{idx}_{side}"
-            blink = is_blinking(obj_id_side, roi)
-            color = (0,255,0) if blink else (0,0,255)
-            cv2.rectangle(processed_frame, (x1,y1), (x2,y2), color, 2)
-            text = "BLINK" if blink else "OFF"
-            cv2.putText(processed_frame, text, (x1, y1-5),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-
-            # 수정된 is_in_trapezoid 함수 사용
-            if not blink and is_in_trapezoid((x1, y1, x2, y2), trapezoid_pts):
+            # 이벤트 판단
+            if is_event_by_bbox((x1, y1, x2, y2), trapezoid_pts, top_hit_flags):
                 current_time = time.time()
                 if current_time - last_event_time >= EVENT_IGNORE_SEC:
                     event = True
@@ -195,6 +197,9 @@ def main():
                     cv2.putText(processed_frame, "EVENT",
                                 (frame.shape[1]//2 - 60, frame.shape[0]//2),
                                 cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0,0,255), 4)
+
+            color = (0, 0, 255) if event else (255, 0, 0)
+            cv2.rectangle(processed_frame, (x1,y1), (x2,y2), color, 2)
 
         # 이벤트 처리
         if event:
@@ -207,7 +212,6 @@ def main():
             event_frames.append(frame.copy())
             post_counter += 1
             if post_counter >= int(EVENT_POST_SEC*fps):
-                # 저장 스레드 실행
                 Thread(target=save_event_video, args=(event_frames.copy(), fps)).start()
                 event_recording = False
                 event_frames = []
