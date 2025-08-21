@@ -87,22 +87,18 @@ def select_closest_objects_perspective(side_objects, frame_width):
     if right_obj: selected.append(('right', right_obj))
     return selected
 
-# ---------- 이벤트 판단 (OpenCV만 사용) ----------
+# ---------- 이벤트 판단 ----------
 def is_event_by_bbox(bbox, trapezoid_pts, top_hit_flags):
     x1, y1, x2, y2 = bbox
-
-    # ROI 마스크 크기: ROI와 바운딩 박스를 모두 포함
     h = max(trapezoid_pts[:,:,1].max(), y2) + 5
     w = max(trapezoid_pts[:,:,0].max(), x2) + 5
     roi_mask = np.zeros((h, w), dtype=np.uint8)
     cv2.fillPoly(roi_mask, trapezoid_pts, 1)
-
     event = False
 
     # 좌변 체크
     for yy in range(y1, y2+1):
-        if yy >= h or x1 >= w:
-            continue
+        if yy >= h or x1 >= w: continue
         if roi_mask[yy, x1]:
             top_hit_flags['left'] = True
             event = True
@@ -110,8 +106,7 @@ def is_event_by_bbox(bbox, trapezoid_pts, top_hit_flags):
 
     # 우변 체크
     for yy in range(y1, y2+1):
-        if yy >= h or x2 >= w:
-            continue
+        if yy >= h or x2 >= w: continue
         if roi_mask[yy, x2]:
             top_hit_flags['right'] = True
             event = True
@@ -120,16 +115,14 @@ def is_event_by_bbox(bbox, trapezoid_pts, top_hit_flags):
     # 상단: 좌/우 먼저 안 겹쳤으면 제외
     if not (top_hit_flags['left'] or top_hit_flags['right']):
         for xx in range(x1, x2+1):
-            if xx >= w or y1 >= h:
-                continue
+            if xx >= w or y1 >= h: continue
             if roi_mask[y1, xx]:
                 return False
 
     # 하단 체크
     if not event:
         for xx in range(x1, x2+1):
-            if xx >= w or y2 >= h:
-                continue
+            if xx >= w or y2 >= h: continue
             if roi_mask[y2, xx]:
                 event = True
                 break
@@ -174,13 +167,11 @@ def main():
 
     while True:
         ret, frame = cap.read()
-        if not ret:
-            break
+        if not ret: break
 
         frame_buffer.append(frame.copy())
         event = False
 
-        # 차량 탐지
         if frame_count % DETECTION_INTERVAL == 0:
             side_objects = detect_side_objects(frame)
             prev_side_objects = select_closest_objects_perspective(side_objects, frame.shape[1])
@@ -188,20 +179,21 @@ def main():
         processed_frame = frame.copy()
 
         for idx, (side, (x1, y1, x2, y2)) in enumerate(prev_side_objects):
-            # 이벤트 판단
             if is_event_by_bbox((x1, y1, x2, y2), trapezoid_pts, top_hit_flags):
                 current_time = time.time()
                 if current_time - last_event_time >= EVENT_IGNORE_SEC:
                     event = True
                     last_event_time = current_time
-                    cv2.putText(processed_frame, "EVENT",
-                                (frame.shape[1]//2 - 60, frame.shape[0]//2),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0,0,255), 4)
 
             color = (0, 0, 255) if event else (255, 0, 0)
             cv2.rectangle(processed_frame, (x1,y1), (x2,y2), color, 2)
 
-        # 이벤트 처리
+        # 화면에 EVENT 표시
+        if event:
+            cv2.putText(processed_frame, "EVENT",
+                        (processed_frame.shape[1]//2 - 60, processed_frame.shape[0]//2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0,0,255), 4)
+
         if event:
             if not event_recording:
                 event_recording = True
