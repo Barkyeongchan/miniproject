@@ -3,18 +3,23 @@ import numpy as np
 import time
 from ultralytics import YOLO
 import torch
+from collections import deque
+import os
+from threading import Thread
 
 # ========= 설정 =========
 VIDEO_PATH = 0  # 웹캠 사용
-SAVE_OUTPUT = False
-OUTPUT_PATH = "blink_flashing_event_final.mp4"
 SCALE = 1.0
 TRAPEZOID_TOP_Y = 0.6
 TRAPEZOID_BOTTOM_Y = 1.0
 TRAPEZOID_TOP_WIDTH = 30
 TRAPEZOID_BOTTOM_WIDTH = 400
 
-# 차량 클래스
+EVENT_PRE_SEC = 3
+EVENT_POST_SEC = 3
+EVENT_SAVE_PATH = "../../img"
+os.makedirs(EVENT_SAVE_PATH, exist_ok=True)
+
 VEHICLE_CLASSES = [2, 3, 5, 7]  # car, motorcycle, bus, truck
 
 # YOLO 모델 로드
@@ -24,10 +29,10 @@ except Exception as e:
     print(f"YOLO 모델 로드 오류: {e}")
     model = None
 
-torch.set_num_threads(4)  # CPU 스레드 설정
+torch.set_num_threads(4)
 
 # ---------- LED 상태 저장 ----------
-led_history = {}  # {obj_id_side: [0,1,0,1,...]}
+led_history = {}
 
 # ---------- 고정 사다리꼴 ----------
 def calculate_fixed_trapezoid(frame_shape):
@@ -74,7 +79,6 @@ def is_blinking(obj_id_side, led_roi):
     
     led_history[obj_id_side] = history
     
-    # 깜빡임 판정: 최소 0→1→0 패턴 발생 여부
     if 1 in history and 0 in history and history.count(1) >= 1 and history.count(0) >= 1:
         return True
     return False
@@ -117,6 +121,16 @@ def is_in_trapezoid(obj_box, trapezoid_pts):
     obj_cx, obj_cy = (x1 + x2)//2, (y1 + y2)//2
     return cv2.pointPolygonTest(trapezoid_pts[0], (obj_cx, obj_cy), False) >= 0
 
+# ---------- 이벤트 영상 저장 ----------
+def save_event_video(frames, fps):
+    filename = os.path.join(EVENT_SAVE_PATH, f"event_{int(time.time())}.mp4")
+    h, w = frames[0].shape[:2]
+    writer = cv2.VideoWriter(filename, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
+    for f in frames:
+        writer.write(f)
+    writer.release()
+    print(f"[INFO] 이벤트 영상 저장 완료: {filename}")
+
 # ---------- 메인 루프 ----------
 def main():
     cap = cv2.VideoCapture(VIDEO_PATH)
@@ -124,11 +138,12 @@ def main():
         print("비디오 열 수 없음")
         return
 
-    writer = None
-    if SAVE_OUTPUT:
-        w, h = int(cap.get(3)), int(cap.get(4))
-        fps = cap.get(cv2.CAP_PROP_FPS) if cap.get(cv2.CAP_PROP_FPS) > 0 else 30
-        writer = cv2.VideoWriter(OUTPUT_PATH, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30
+    frame_buffer = deque(maxlen=int(EVENT_PRE_SEC*fps))
+    event_recording = False
+    event_frames = []
+    post_counter = 0
+    event_index = 0
 
     ret, frame = cap.read()
     if not ret:
@@ -146,11 +161,16 @@ def main():
         if not ret:
             break
 
+        frame_buffer.append(frame.copy())
+
+        # 차량 탐지
         if frame_count % DETECTION_INTERVAL == 0:
             side_objects = detect_side_objects(frame)
             prev_side_objects = select_closest_objects_perspective(side_objects, frame.shape[1])
 
         processed_frame = frame.copy()
+        event = False
+
         for idx, (side, (x1, y1, x2, y2)) in enumerate(prev_side_objects):
             obj_crop = processed_frame[y1:y2, x1:x2]
             roi = get_led_roi(obj_crop, side)
@@ -162,11 +182,28 @@ def main():
             cv2.putText(processed_frame, text, (x1, y1-5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-            # 사다리꼴 ROI 이벤트 표시
             if not blink and is_in_trapezoid((x1, y1, x2, y2), trapezoid_pts):
+                event = True
                 cv2.putText(processed_frame, "EVENT",
                             (frame.shape[1]//2 - 60, frame.shape[0]//2),
                             cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0,0,255), 4)
+
+        # 이벤트 처리
+        if event:
+            if not event_recording:
+                event_recording = True
+                event_frames = list(frame_buffer)
+                post_counter = 0
+                event_index += 1
+
+        if event_recording:
+            event_frames.append(frame.copy())
+            post_counter += 1
+            if post_counter >= int(EVENT_POST_SEC*fps):
+                # 저장 스레드 실행
+                Thread(target=save_event_video, args=(event_frames.copy(), fps)).start()
+                event_recording = False
+                event_frames = []
 
         processed_frame = visualize_only(processed_frame, trapezoid_pts)
 
@@ -180,13 +217,11 @@ def main():
                                  (int(processed_frame.shape[1]*SCALE),
                                   int(processed_frame.shape[0]*SCALE)))
         cv2.imshow("Drive", vis_resized)
-        if writer: writer.write(processed_frame)
 
         if cv2.waitKey(1) & 0xFF in [27, ord('q')]:
             break
 
     cap.release()
-    if writer: writer.release()
     cv2.destroyAllWindows()
 
 if __name__=="__main__":
