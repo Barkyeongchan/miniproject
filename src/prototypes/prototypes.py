@@ -1,55 +1,84 @@
 import cv2
 import numpy as np
 import time
+from ultralytics import YOLO
 
 # ========= 설정 =========
-VIDEO_PATH = "../../assets/drive_sample.mp4"  # 영상 경로
+VIDEO_PATH = 0  # 웹캠 사용
 SAVE_OUTPUT = False
 OUTPUT_PATH = "fixed_30fps_output.mp4"
-SCALE = 0.6
+SCALE = 1.2
+
+# 고정 사다리꼴의 기본 설정값
 TRAPEZOID_TOP_Y = 0.6
 TRAPEZOID_BOTTOM_Y = 1.0
 TRAPEZOID_TOP_WIDTH = 30
-TRAPEZOID_BOTTOM_WIDTH = 600
+TRAPEZOID_BOTTOM_WIDTH = 400
 
+# YOLO 모델 로드
+try:
+    model = YOLO('yolo11n.pt')
+except Exception as e:
+    print(f"YOLO 모델을 로드하는 중 오류가 발생했습니다: {e}")
+    model = None
+
+# ---------- 고정된 사다리꼴 좌표 계산 ----------
 def calculate_fixed_trapezoid(frame_shape):
     h, w = frame_shape[:2]
     center_x = w // 2
+
     top_y = int(h * TRAPEZOID_TOP_Y)
     bottom_y = int(h * TRAPEZOID_BOTTOM_Y)
+
     top_left_x = center_x - TRAPEZOID_TOP_WIDTH // 2
     top_right_x = center_x + TRAPEZOID_TOP_WIDTH // 2
     bottom_left_x = center_x - TRAPEZOID_BOTTOM_WIDTH // 2
     bottom_right_x = center_x + TRAPEZOID_BOTTOM_WIDTH // 2
+
     trapezoid_pts = np.array([[
         (bottom_left_x, bottom_y),
         (top_left_x, top_y),
         (top_right_x, top_y),
         (bottom_right_x, bottom_y)
     ]], dtype=np.int32)
+
     return trapezoid_pts
 
+# ---------- ROI 시각화 ----------
 def visualize_only(frame, trapezoid_pts):
     overlay = np.zeros_like(frame, np.uint8)
     cv2.fillPoly(overlay, trapezoid_pts, (0, 255, 0))
-    return cv2.addWeighted(frame, 1.0, overlay, 0.3, 0)
+    result = cv2.addWeighted(frame, 1.0, overlay, 0.3, 0)
+    return result
 
+# ---------- 중앙 60% 영역 크롭 ----------
+def crop_center(frame, scale=0.6):
+    h, w = frame.shape[:2]
+    new_w = int(w * scale)
+    new_h = int(h * scale)
+
+    start_x = w // 2 - new_w // 2
+    start_y = h // 2 - new_h // 2
+    end_x = start_x + new_w
+    end_y = start_y + new_h
+
+    cropped = frame[start_y:end_y, start_x:end_x]
+    return cropped, (start_x, start_y)
+
+# ---------- 메인 루프 ----------
 def main():
     cap = cv2.VideoCapture(VIDEO_PATH)
     if not cap.isOpened():
-        print("비디오를 열 수 없습니다:", VIDEO_PATH)
+        print("비디오를 열 수 없습니다.")
         return
-
-    target_fps = 30
-    frame_time = 1.0 / target_fps
-    next_frame_time = time.time()
 
     writer = None
     if SAVE_OUTPUT:
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS) if cap.get(cv2.CAP_PROP_FPS) > 0 else 30
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(OUTPUT_PATH, fourcc, target_fps, (w, h))
+        writer = cv2.VideoWriter(OUTPUT_PATH, fourcc, fps, (w, h))
 
     ret, frame = cap.read()
     if not ret:
@@ -57,33 +86,36 @@ def main():
         return
     trapezoid_points = calculate_fixed_trapezoid(frame.shape)
 
-    # --- FPS 측정용 ---
-    frame_counter = 0
-    fps_timer = time.time()
-    actual_fps = 0.0
+    frame_count = 0
+    start_time = time.time()
 
     while True:
-        # --- 다음 프레임 표시할 시간까지 대기 ---
-        sleep_time = next_frame_time - time.time()
-        if sleep_time > 0:
-            time.sleep(sleep_time)
-
-        next_frame_time += frame_time  # 다음 목표 시간 업데이트
-
         ret, frame = cap.read()
         if not ret:
             break
 
+        # 중앙 60%만 크롭
+        cropped, (offset_x, offset_y) = crop_center(frame, scale=0.6)
+
+        # YOLO 탐지 (중앙 60% 영역만)
+        if model:
+            results = model(cropped, verbose=False)
+            processed_crop = results[0].plot()
+        else:
+            processed_crop = cropped.copy()
+
+        # 원본 프레임에 다시 반영
+        frame[offset_y:offset_y+processed_crop.shape[0],
+              offset_x:offset_x+processed_crop.shape[1]] = processed_crop
+
+        # ROI 시각화
         processed_frame = visualize_only(frame, trapezoid_points)
 
-        # --- 실제 FPS 계산 ---
-        frame_counter += 1
-        if time.time() - fps_timer >= 1.0:
-            actual_fps = frame_counter / (time.time() - fps_timer)
-            frame_counter = 0
-            fps_timer = time.time()
+        # 실제 FPS 계산
+        frame_count += 1
+        elapsed_time = time.time() - start_time
+        actual_fps = frame_count / elapsed_time if elapsed_time > 0 else 0
 
-        # FPS 표시 (왼쪽 상단)
         cv2.putText(processed_frame,
                     f"FPS: {actual_fps:.2f}",
                     (10, 30),
