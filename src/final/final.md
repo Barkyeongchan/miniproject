@@ -28,6 +28,8 @@ VEHICLE_CLASSES = [2, 3, 5, 7]
 
 `os.makedirs(EVENT_SAVE_PATH, exist_ok=True)`: 폴더 없으면 자동 생성
 
+<br><br>
+
 ## 2. YOLO 모델 로드 및 최적화
 
 ```python
@@ -40,6 +42,8 @@ torch.set_num_threads(4)
 ```
 
 `yolov8n.pt`를 사용하여 실시간 처리 기능(FPS) 향상
+
+<br><br>
 
 ## 3. 함수
 
@@ -117,6 +121,8 @@ def save_event_video(frames, fps):
 
 - FPS 최적화: 디스크 쓰기 작업이 메인 루프를 블로킹하지 않음
 
+<br><br>
+
 ## 4. 메인 루프 함수
 
 ```python
@@ -175,6 +181,8 @@ cv2.putText(processed_frame, f"FPS: {fps_display:.2f}", ...)
 
 - 화면 확대/축소 가능 (`SCALE`)
 
+<br><br>
+
 ## 5. FPS 향상을 위해 적용된 요소들
 
 | 최적화 요소                     | 적용 위치                                | 설명                                   |
@@ -185,6 +193,8 @@ cv2.putText(processed_frame, f"FPS: {fps_display:.2f}", ...)
 | 이벤트 영상 저장 비동기           | `Thread(target=save_event_video, ...)`   | 디스크 쓰기 중 메인 루프 블로킹 방지 |
 | 좌/우 차량 1개만 선택             | `select_closest_objects_perspective`    | 탐지 결과 처리 최소화                 |
 | 간단한 ROI 오버레이               | `visualize_only`                         | 무거운 렌더링 없이 시각화             |
+
+<br><br>
 
 ## 6. 전체 코드
 
@@ -486,13 +496,16 @@ if __name__ == "__main__":
     main()
 ```
 
+<br><br>
+
 ## 7. 결과
 
 [실행 환경](assets/final.mp4)
 
-<img width="1000" height="563" alt="image" src="assets/final.jpg" />
+<img width="1000" height="563" alt="image" src="https://raw.githubusercontent.com/Barkyeongchan/miniproject/refs/heads/main/assets/final.jpg" />
 
 <img width="795" height="632" alt="image" src="https://github.com/user-attachments/assets/6a302dc8-262d-49a9-b43b-a31d0d928c61" />
 
 [저장 결과물](assets/event_1755761493.mp4)
+
 
