@@ -508,9 +508,12 @@ if __name__ == "__main__":
 
 **[결과물]**
 
-<img width="795" height="632" alt="image" src="https://github.com/user-attachments/assets/6a302dc8-262d-49a9-b43b-a31d0d928c61" />
-
 <img width="640" height="480" alt="image" src="https://raw.githubusercontent.com/Barkyeongchan/miniproject/refs/heads/main/assets/event_1755761493.gif" />
+
+<img width="640" height="480" alt="image" src="https://github.com/user-attachments/assets/6a302dc8-262d-49a9-b43b-a31d0d928c61" />
+
+
+
 
 
 
