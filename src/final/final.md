@@ -502,9 +502,7 @@ if __name__ == "__main__":
 
 **[실행 환경]**
 
-<img width="654" height="368" alt="image" src="https://github.com/user-attachments/assets/0b9c2762-d840-4e79-92d8-a3c2f45c4e1c" />
-
-<img width="1000" height="563" alt="image" src="https://raw.githubusercontent.com/Barkyeongchan/miniproject/refs/heads/main/assets/final.jpg" />
+<img width="654" height="368" alt="image" src="https://raw.githubusercontent.com/Barkyeongchan/miniproject/refs/heads/main/assets/final.gif" />
 
 <br><br>
 
@@ -512,7 +510,8 @@ if __name__ == "__main__":
 
 <img width="795" height="632" alt="image" src="https://github.com/user-attachments/assets/6a302dc8-262d-49a9-b43b-a31d0d928c61" />
 
-<img width="640" height="480" alt="image" src="https://github.com/user-attachments/assets/f79d67bb-f883-4948-9186-ab0bcedb6f08" />
+<img width="640" height="480" alt="image" src="https://raw.githubusercontent.com/Barkyeongchan/miniproject/refs/heads/main/assets/event_1755761493.gif" />
+
 
 
 
